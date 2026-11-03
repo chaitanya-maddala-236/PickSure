@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: picksure
+      POSTGRES_USER: picksure
+      POSTGRES_PASSWORD: picksure_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - picksure-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U picksure -d picksure"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  api:
+    build: ./backend
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://picksure:picksure_dev@db:5432/picksure
+      JWT_SECRET: ${JWT_SECRET:-local-picksure-development-secret-change-before-deploy}
+      DEMO_SEED: "true"
+      MINIMUM_SHELF_LIFE_DAYS: ${MINIMUM_SHELF_LIFE_DAYS:-3}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  picksure-postgres:
