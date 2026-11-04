@@ -55,8 +55,13 @@ jobs:
           disable-animations: false
           working-directory: android
           script: |
-            bash gradlew --max-workers=2 :app:connectedDebugAndroidTest
+            set -e
+            adb wait-for-device
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             mkdir -p ../screenshots
+            adb shell am instrument -w -r com.picksure.android.test/androidx.test.runner.AndroidJUnitRunner | tee ../screenshots/instrumentation.txt
+            grep -q "INSTRUMENTATION_CODE: 0" ../screenshots/instrumentation.txt
             adb pull /sdcard/Android/data/com.picksure.android/files/picksure-demo ../screenshots/captured
             mv ../screenshots/captured/*.png ../screenshots/
             rmdir ../screenshots/captured
