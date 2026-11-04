@@ -87,7 +87,7 @@ Offline delivery is at least once. Server UUID idempotency ensures an accepted e
 
 ## Tests and evidence
 
-GitHub Actions installs the backend dependencies, runs three backend advisor tests, starts a seeded API, and runs Android unit tests, shared KMP tests, and a Compose UI walkthrough on an API 34 emulator. The UI walkthrough signs in, visits batch picking and the freshness advisor, and saves the four screenshots used above. CI builds an unsigned debug APK and uploads reports and the APK artifact.
+GitHub Actions installs the backend dependencies, runs three backend advisor tests, starts a seeded API, and runs Android unit tests, shared KMP tests, and a Compose UI walkthrough on an API 35 emulator. The UI walkthrough signs in, visits batch picking and the freshness advisor, and saves the four screenshots used above. CI builds an unsigned debug APK and uploads reports and the APK artifact.
 
 ```powershell
 # Backend tests (from backend/)
