@@ -44,35 +44,18 @@ jobs:
         timeout-minutes: 40
         with:
           api-level: 35
-          target: google_apis
+          target: google_atd
           arch: x86_64
           profile: pixel_2
+          cores: 4
+          ram-size: 4096M
+          heap-size: 1024M
           force-avd-creation: true
           emulator-boot-timeout: 1500
           emulator-options: -no-window -no-audio -no-boot-anim -camera-back emulated
           disable-animations: true
           working-directory: android
-          script: |
-            set -e
-            adb devices -l
-            timeout 180s adb wait-for-device
-            timeout 180s adb install --no-streaming -r app/build/outputs/apk/debug/app-debug.apk
-            timeout 180s adb install --no-streaming -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            mkdir -p ../screenshots
-            adb logcat -c
-            set +e
-            timeout 240s adb shell am instrument -w -r com.picksure.android.test/androidx.test.runner.AndroidJUnitRunner > ../screenshots/instrumentation.txt 2>&1
-            instrumentation_status=$?
-            set -e
-            cat ../screenshots/instrumentation.txt
-            adb logcat -d -v time > ../screenshots/logcat.txt
-            if [ "$instrumentation_status" -ne 0 ] || grep -q "shortMsg=Process crashed" ../screenshots/instrumentation.txt; then
-              exit 1
-            fi
-            grep -q "INSTRUMENTATION_CODE: 0" ../screenshots/instrumentation.txt
-            adb pull /sdcard/Android/data/com.picksure.android/files/picksure-demo ../screenshots/captured
-            mv ../screenshots/captured/*.png ../screenshots/
-            rmdir ../screenshots/captured
+          script: bash ../scripts/capture-emulator-demo.sh
       - name: Collect screenshots and create the short demo reel
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
