@@ -38,7 +38,10 @@ jobs:
           cat "$RUNNER_TEMP/picksure/api.log"
           exit 1
         working-directory: backend
-      - name: Run Android unit, shared KMP, and UI flow tests on an emulator
+      - name: Run Android unit and shared KMP tests and prebuild test APKs
+        run: bash gradlew --max-workers=2 :app:testDebugUnitTest :shared:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+        working-directory: android
+      - name: Run Android UI flow test on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         timeout-minutes: 40
         with:
@@ -51,16 +54,17 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: false
           working-directory: android
-          script: bash gradlew :app:testDebugUnitTest :shared:testDebugUnitTest :app:connectedDebugAndroidTest :app:assembleDebug
+          script: |
+            bash gradlew --max-workers=2 :app:connectedDebugAndroidTest
+            mkdir -p ../screenshots
+            adb pull /sdcard/Android/data/com.picksure.android/files/picksure-demo ../screenshots/captured
+            mv ../screenshots/captured/*.png ../screenshots/
+            rmdir ../screenshots/captured
       - name: Collect screenshots and create the short demo reel
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          mkdir -p screenshots
-          adb pull /sdcard/Android/data/com.picksure.android/files/picksure-demo screenshots/captured
-          mv screenshots/captured/*.png screenshots/
-          rmdir screenshots/captured
           ffmpeg -y -framerate 1/3 -pattern_type glob -i 'screenshots/0*.png' \
             -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
             -r 30 -c:v libx264 -movflags +faststart screenshots/picksure-demo.mp4
