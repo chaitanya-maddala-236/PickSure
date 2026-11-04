@@ -40,5 +40,12 @@ data class FreshnessSummaryDto(
     val minimum_shelf_life_days: Int, val safe_units: Int, val near_expiry_units: Int,
     val expired_units: Int, val lots: List<FreshnessLotDto>,
 )
+data class FreshnessAdviceActionDto(val lot_code: String, val recommendation: String, val reason: String)
+data class FreshnessAdviceDto(
+    val provider: String,
+    val model: String? = null,
+    val summary: String,
+    val actions: List<FreshnessAdviceActionDto> = emptyList(),
+)
 data class ApprovalRequest(val decision: String)
 data class SubstitutionDto(val id: String, val task_item_id: String, val original_sku: String, val replacement_sku: String, val reason: String?, val approval_status: String)

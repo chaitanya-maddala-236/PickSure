@@ -12,6 +12,7 @@ interface PickSureApi {
     @POST("scan/verify") suspend fun verifyScan(@Body body: ScanVerifyRequest): ScanVerifyResponse
     @POST("scan/verify-lot") suspend fun verifyLot(@Body body: LotVerifyRequest): LotVerifyResponse
     @GET("inventory/freshness") suspend fun freshness(): FreshnessSummaryDto
+    @GET("inventory/freshness/advice") suspend fun freshnessAdvice(): FreshnessAdviceDto
     @POST("sync/events") suspend fun syncEvents(@Body body: SyncBatchRequest): SyncBatchResponse
     @GET("substitutions/pending") suspend fun pendingSubstitutions(): List<SubstitutionDto>
     @POST("substitutions/{substitutionId}/approve") suspend fun decideSubstitution(@Path("substitutionId") substitutionId: String, @Body body: ApprovalRequest): SubstitutionDto

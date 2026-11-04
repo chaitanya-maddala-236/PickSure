@@ -55,12 +55,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.picksure.android.data.local.PickEventEntity
+import com.picksure.android.data.CrashReporter
 import com.picksure.android.data.local.PickSureDatabase
 import com.picksure.android.data.local.TaskCacheEntity
 import com.picksure.android.data.local.TaskItemCacheEntity
 import com.picksure.android.data.remote.ApiFactory
 import com.picksure.android.data.remote.ApprovalRequest
+import com.picksure.android.data.remote.FreshnessAdviceDto
 import com.picksure.android.data.remote.LoginRequest
 import com.picksure.android.data.remote.FreshnessSummaryDto
 import com.picksure.android.data.remote.LotVerifyRequest
@@ -70,7 +71,16 @@ import com.picksure.android.data.remote.TaskDto
 import com.picksure.android.data.remote.TaskItemDto
 import com.picksure.android.data.sync.LocalEventRepository
 import com.picksure.android.data.sync.SyncScheduler
+import com.picksure.android.domain.model.PickEvent
+import com.picksure.android.domain.usecase.ObservePickEvents
+import com.picksure.android.domain.usecase.PickedProgress
+import com.picksure.android.domain.usecase.RecordPickEvent
+import com.picksure.android.domain.usecase.RetryPickEvents
 import com.picksure.android.ui.BarcodeCamera
+import com.picksure.shared.FreshnessPolicy
+import com.picksure.shared.LotDisposition
+import com.picksure.shared.RouteStop
+import com.picksure.shared.ShelfRoutePlanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -123,11 +133,12 @@ private data class BatchLine(val sku: String, val name: String, val barcode: Str
                              val lotStatus: String = "no_stock")
 private enum class Screen { LOGIN, DASHBOARD, BATCH, SCANNER, EXCEPTION, PACKING, SYNC, APPROVALS, FRESHNESS }
 
-private fun pickedProgress(item: PickableItem, events: List<PickEventEntity>): Int {
-    val related = events.filter { it.taskItemId == item.id && it.eventType == "PICK" }
-    val acknowledgedLocally = related.filter { it.syncStatus == "SYNCED" }.sumOf { it.quantity }
-    val waitingForAck = related.filter { it.syncStatus == "PENDING" || it.syncStatus == "SYNCING" }.sumOf { it.quantity }
-    return maxOf(item.serverPicked, acknowledgedLocally) + waitingForAck
+private fun pickedProgress(item: PickableItem, events: List<PickEvent>): Int =
+    PickedProgress.calculate(item.id, item.serverPicked, events)
+
+private fun localLotIsDispatchable(expiresOn: String?, minimumShelfLifeDays: Int): Boolean {
+    val expiryDay = expiresOn?.let { runCatching { java.time.LocalDate.parse(it).toEpochDay() }.getOrNull() } ?: return false
+    return FreshnessPolicy.classify(expiryDay, java.time.LocalDate.now().toEpochDay(), minimumShelfLifeDays) == LotDisposition.AVAILABLE
 }
 
 private fun demoTasks(): List<OrderTask> {
@@ -182,10 +193,13 @@ private fun PickSureApp() {
     val context = LocalContext.current
     val api = remember { ApiFactory.create(context) }
     val database = remember { PickSureDatabase.get(context) }
-    val events by database.pickEventDao().observeAll().collectAsState(initial = emptyList())
+    val repository = remember { LocalEventRepository(context) }
+    val observePickEvents = remember(repository) { ObservePickEvents(repository) }
+    val events by observePickEvents().collectAsState(initial = emptyList())
     val cachedSnapshots by database.taskCacheDao().observeSnapshot().collectAsState(initial = emptyList())
     val prefs = remember { context.getSharedPreferences("picksure", android.content.Context.MODE_PRIVATE) }
-    val repository = remember { LocalEventRepository(context) }
+    val recordPickEvent = remember(repository) { RecordPickEvent(repository) }
+    val retryPickEvents = remember(repository) { RetryPickEvents(repository) }
     val scope = rememberCoroutineScope()
     var screen by remember { mutableStateOf(if (prefs.getString("token", null).isNullOrBlank()) Screen.LOGIN else Screen.DASHBOARD) }
     var tasks by remember { mutableStateOf(demoTasks()) }
@@ -193,6 +207,7 @@ private fun PickSureApp() {
     var employeeRole by remember { mutableStateOf(prefs.getString("employee_role", "picker") ?: "picker") }
     var approvals by remember { mutableStateOf(emptyList<SubstitutionDto>()) }
     var freshness by remember { mutableStateOf<FreshnessSummaryDto?>(null) }
+    var freshnessAdvice by remember { mutableStateOf<FreshnessAdviceDto?>(null) }
     var email by remember { mutableStateOf("picker@picksure.demo") }
     var password by remember { mutableStateOf("PickSure123!") }
     var message by remember { mutableStateOf<String?>(null) }
@@ -218,7 +233,11 @@ private fun PickSureApp() {
         val first = line.items.first()
         line.copy(recommendedLotId = first.recommendedLotId, lotCode = first.lotCode,
             lotTag = first.lotTag, expiresOn = first.expiresOn, lotStatus = first.lotStatus)
-    }.sortedWith(compareBy<BatchLine>({ it.aisle }, { it.rack }, { it.shelf }, { it.sku }))
+    }.let { lines ->
+        val bySku = lines.associateBy { it.sku }
+        ShelfRoutePlanner.order(lines.map { RouteStop(it.sku, it.aisle, it.rack, it.shelf) })
+            .mapNotNull { bySku[it.sku] }
+    }
 
     suspend fun loadServerTasks(): List<OrderTask> {
         val loaded = withContext(Dispatchers.IO) {
@@ -243,11 +262,13 @@ private fun PickSureApp() {
 
     suspend fun loadApprovals(): List<SubstitutionDto> = withContext(Dispatchers.IO) { api.pendingSubstitutions() }
     suspend fun loadFreshness(): FreshnessSummaryDto = withContext(Dispatchers.IO) { api.freshness() }
+    suspend fun loadFreshnessAdvice(): FreshnessAdviceDto = withContext(Dispatchers.IO) { api.freshnessAdvice() }
 
     LaunchedEffect(Unit) {
         if (!prefs.getString("token", null).isNullOrBlank()) {
             runCatching { loadServerTasks() }.onSuccess { if (it.isNotEmpty()) tasks = it }
             runCatching { loadFreshness() }.onSuccess { freshness = it }
+            runCatching { loadFreshnessAdvice() }.onSuccess { freshnessAdvice = it }
             if (employeeRole in setOf("supervisor", "admin")) runCatching { loadApprovals() }.onSuccess { approvals = it }
             SyncScheduler.schedule(context)
         }
@@ -268,6 +289,7 @@ private fun PickSureApp() {
         }
         if (screen == Screen.FRESHNESS && !prefs.getString("token", null).isNullOrBlank()) {
             runCatching { loadFreshness() }.onSuccess { freshness = it }
+            runCatching { loadFreshnessAdvice() }.onSuccess { freshnessAdvice = it }
         }
         if (screen == Screen.BATCH && !prefs.getString("token", null).isNullOrBlank()) {
             runCatching { loadServerTasks() }.onSuccess { if (it.isNotEmpty()) tasks = it }
@@ -310,10 +332,14 @@ private fun PickSureApp() {
                                     employeeRole = login.employee.role
                                     runCatching { loadServerTasks() }.onSuccess { if (it.isNotEmpty()) tasks = it }
                                     runCatching { loadFreshness() }.onSuccess { freshness = it }
+                                    runCatching { loadFreshnessAdvice() }.onSuccess { freshnessAdvice = it }
                                     if (employeeRole in setOf("supervisor", "admin")) runCatching { loadApprovals() }.onSuccess { approvals = it }
                                     SyncScheduler.schedule(context)
                                     screen = Screen.DASHBOARD
-                                }.onFailure { message = "Could not sign in. Check your connection or continue offline." }
+                                }.onFailure {
+                                    CrashReporter.record(context, "login", it)
+                                    message = "Could not sign in. Check your connection or continue offline."
+                                }
                             busy = false
                         }
                     },
@@ -360,6 +386,9 @@ private fun PickSureApp() {
                                         if (remoteCheck != null && !remoteCheck.valid) message = remoteCheck.message
                                         else if (item.recommendedLotId.isNullOrBlank() || item.lotTag.isNullOrBlank()) {
                                             message = "No safe lot is available. Report this item to the supervisor."
+                                        } else if (item.lotStatus != "ready" || !localLotIsDispatchable(
+                                                item.expiresOn, freshness?.minimum_shelf_life_days ?: 3)) {
+                                            message = "The cached lot is inside the shelf-life limit. Refresh the batch before picking."
                                         } else {
                                             message = null
                                             scanStep = "LOT"
@@ -375,7 +404,7 @@ private fun PickSureApp() {
                                         }.getOrNull()
                                         if (remoteCheck != null && !remoteCheck.valid) message = remoteCheck.message
                                         else {
-                                            repository.record("PICK", item.taskId, item.id, item.sku, item.barcode, quantity,
+                                            recordPickEvent("PICK", item.taskId, item.id, item.sku, item.barcode, quantity,
                                                 lotId = item.recommendedLotId, lotTag = scanned)
                                             message = "${item.lotCode} verified · expires ${item.expiresOn}. Saved locally; server confirmation is pending."
                                             screen = Screen.BATCH
@@ -389,23 +418,23 @@ private fun PickSureApp() {
                     { replacementSku = it }, onBack = { screen = Screen.BATCH },
                     onUnavailable = {
                         val item = selectedItem ?: return@ExceptionScreen
-                        scope.launch { repository.record("EXCEPTION", item.taskId, item.id, item.sku, reason = exceptionReason); message = "Unavailable item saved locally. Server confirmation is pending."; screen = Screen.BATCH }
+                        scope.launch { recordPickEvent("EXCEPTION", item.taskId, item.id, item.sku, reason = exceptionReason); message = "Unavailable item saved locally. Server confirmation is pending."; screen = Screen.BATCH }
                     },
                     onSubstitute = {
                         val item = selectedItem ?: return@ExceptionScreen
-                        scope.launch { repository.record("SUBSTITUTION", item.taskId, item.id, item.sku,
+                        scope.launch { recordPickEvent("SUBSTITUTION", item.taskId, item.id, item.sku,
                             reason = exceptionReason, replacementSku = replacementSku, approvalStatus = "pending"); message = "Substitution request saved locally. Supervisor approval is still required."; screen = Screen.BATCH }
                     })
                 Screen.PACKING -> PackingScreen(tasks, events, ::pickedCount, ::resolved, currentOrder,
                     onSelect = { currentOrder = it }, onBack = { screen = Screen.BATCH },
                     onPack = { order ->
                         scope.launch {
-                            repository.record("PACK", order.id)
+                            recordPickEvent("PACK", order.id)
                             message = "Packing saved on this device. Server confirmation is pending."
                         }
                     }, message = message)
                 Screen.SYNC -> SyncScreen(events, onBack = { screen = Screen.BATCH }, onRetry = {
-                    scope.launch { repository.retry(); message = "Retry queued when network is available." }
+                    scope.launch { retryPickEvents(); message = "Retry queued when network is available." }
                 }, message = message)
                 Screen.APPROVALS -> ApprovalScreen(approvals, onBack = { screen = Screen.DASHBOARD }, onDecision = { row, decision ->
                     scope.launch {
@@ -417,8 +446,11 @@ private fun PickSureApp() {
                             }.onFailure { message = "Could not submit the approval decision." }
                     }
                 }, message = message)
-                Screen.FRESHNESS -> FreshnessScreen(freshness, onBack = { screen = Screen.DASHBOARD }, onRefresh = {
-                    scope.launch { runCatching { loadFreshness() }.onSuccess { freshness = it } }
+                Screen.FRESHNESS -> FreshnessScreen(freshness, freshnessAdvice, onBack = { screen = Screen.DASHBOARD }, onRefresh = {
+                    scope.launch {
+                        runCatching { loadFreshness() }.onSuccess { freshness = it }
+                        runCatching { loadFreshnessAdvice() }.onSuccess { freshnessAdvice = it }
+                    }
                 })
             }
         }
@@ -463,7 +495,7 @@ private fun LoginScreen(email: String, onEmail: (String) -> Unit, password: Stri
 }
 
 @Composable
-private fun DashboardScreen(tasks: List<OrderTask>, events: List<PickEventEntity>, employee: String, role: String,
+private fun DashboardScreen(tasks: List<OrderTask>, events: List<PickEvent>, employee: String, role: String,
                             freshness: FreshnessSummaryDto?,
                             onStart: () -> Unit, onPacking: () -> Unit, onSync: () -> Unit,
                             onApprovals: () -> Unit, onFreshness: () -> Unit, onLogout: () -> Unit) {
@@ -548,7 +580,7 @@ private fun MetricCard(label: String, value: String, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun BatchScreen(lines: List<BatchLine>, events: List<PickEventEntity>, pickedCount: (PickableItem) -> Int,
+private fun BatchScreen(lines: List<BatchLine>, events: List<PickEvent>, pickedCount: (PickableItem) -> Int,
                         isResolved: (PickableItem) -> Boolean,
                         feedback: String?,
                         onPick: (BatchLine) -> Unit, onProblem: (BatchLine) -> Unit, onPacking: () -> Unit, onSync: () -> Unit) {
@@ -669,7 +701,7 @@ private fun ExceptionScreen(item: PickableItem?, reason: String, onReason: (Stri
 }
 
 @Composable
-private fun PackingScreen(tasks: List<OrderTask>, events: List<PickEventEntity>, pickedCount: (PickableItem) -> Int,
+private fun PackingScreen(tasks: List<OrderTask>, events: List<PickEvent>, pickedCount: (PickableItem) -> Int,
                           isResolved: (PickableItem) -> Boolean,
                           selected: OrderTask?, onSelect: (OrderTask) -> Unit, onBack: () -> Unit, onPack: (OrderTask) -> Unit, message: String?) {
     val order = selected ?: tasks.firstOrNull()
@@ -723,7 +755,7 @@ private fun PackingScreen(tasks: List<OrderTask>, events: List<PickEventEntity>,
 }
 
 @Composable
-private fun FreshnessScreen(summary: FreshnessSummaryDto?, onBack: () -> Unit, onRefresh: () -> Unit) {
+private fun FreshnessScreen(summary: FreshnessSummaryDto?, advice: FreshnessAdviceDto?, onBack: () -> Unit, onRefresh: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("Keep short-dated stock out of customer bags", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -751,6 +783,7 @@ private fun FreshnessScreen(summary: FreshnessSummaryDto?, onBack: () -> Unit, o
                     MetricCard("Expired", summary.expired_units.toString(), Modifier.weight(1f), Red)
                 }
             }
+            item { FreshnessAdvisorCard(advice) }
             item { Text("Lot traceability", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink) }
             if (summary.lots.isEmpty()) item { EmptyCard("No stock lots", "Inventory lots will appear when the store is seeded or replenished.") }
             items(summary.lots) { lot ->
@@ -776,6 +809,31 @@ private fun FreshnessScreen(summary: FreshnessSummaryDto?, onBack: () -> Unit, o
             }
         }
         item { TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back to dashboard") } }
+    }
+}
+
+@Composable
+private fun FreshnessAdvisorCard(advice: FreshnessAdviceDto?) {
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF2ED))) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("AI Freshness Advisor", modifier = Modifier.weight(1f), color = ForestDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
+                    Text(advice?.provider?.uppercase() ?: "LOADING", Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                        color = Forest, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Text(advice?.summary ?: "Review short-dated lots and recovery options.", color = Ink, fontSize = 13.sp)
+            advice?.actions?.forEach { action ->
+                Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(10.dp)).padding(11.dp)) {
+                    Text("${action.recommendation.replace('_', ' ').uppercase()} · ${action.lot_code}",
+                        color = when (action.recommendation) { "quarantine_review" -> Red; "donation_review" -> Orange; else -> Forest },
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(action.reason, color = Muted, fontSize = 12.sp)
+                }
+            }
+            Text("Suggestions require staff review and never change stock automatically.", color = Muted, fontSize = 11.sp)
+        }
     }
 }
 
@@ -808,7 +866,7 @@ private fun ApprovalScreen(rows: List<SubstitutionDto>, onBack: () -> Unit,
 }
 
 @Composable
-private fun SyncScreen(events: List<PickEventEntity>, onBack: () -> Unit, onRetry: () -> Unit, message: String?) {
+private fun SyncScreen(events: List<PickEvent>, onBack: () -> Unit, onRetry: () -> Unit, message: String?) {
     val pending = events.count { it.syncStatus == "PENDING" || it.syncStatus == "SYNCING" }
     val synced = events.count { it.syncStatus == "SYNCED" }
     val attention = events.count { it.syncStatus == "NEEDS_ATTENTION" }

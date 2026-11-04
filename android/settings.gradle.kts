@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "PickSure"
-include(":app")
+include(":app", ":shared")

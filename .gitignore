@@ -11,3 +11,4 @@ backend/*.db
 backend/.env
 .env
 *.apk
+android/app/google-services.json

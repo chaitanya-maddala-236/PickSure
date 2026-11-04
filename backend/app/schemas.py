@@ -100,6 +100,19 @@ class FreshnessSummary(BaseModel):
     lots: list[FreshnessLotView]
 
 
+class FreshnessAdviceAction(BaseModel):
+    lot_code: str
+    recommendation: Literal["markdown_review", "donation_review", "quarantine_review"]
+    reason: str
+
+
+class FreshnessAdvice(BaseModel):
+    provider: Literal["gemini", "rules"]
+    model: str | None = None
+    summary: str
+    actions: list[FreshnessAdviceAction]
+
+
 class InventoryView(BaseModel):
     sku: str
     product_name: str

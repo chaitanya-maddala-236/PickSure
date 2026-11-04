@@ -1,90 +1,110 @@
 # PickSure
 
-**Freshness-first grocery fulfillment for quick-commerce dark stores.** PickSure helps store teams pick the right product, choose a dispatchable expiry lot, and keep work safe when the network drops.
+[![Android verification](https://github.com/chaitanya-maddala-236/PickSure/actions/workflows/android.yml/badge.svg)](https://github.com/chaitanya-maddala-236/PickSure/actions/workflows/android.yml)
 
-The differentiator is **Freshness First**: a picker scans the product barcode and its lot QR. The API recommends the earliest-expiring lot that still meets the store's shelf-life rule (FEFO), blocks lots that are expired or too close to expiry, and records the selected lot with the pick. Supervisors can see safe, held-back, and expired inventory in the freshness monitor.
+**Freshness-first picking for quick-commerce dark stores.** PickSure is a portfolio Android app for a real operational problem: a picker can choose the right grocery SKU but still select a lot that is too close to expiry. PickSure combines a product barcode scan with an expiry-lot QR, applies FEFO (first-expiry, first-out), and keeps picks safe to record when the network drops.
 
-> Portfolio project inspired by quick-commerce operations. It uses seeded demo data and is not connected to Blinkit or a live warehouse.
+> Built as an independent portfolio project inspired by quick-commerce workflows. It is not affiliated with Blinkit and does not connect to Blinkit's systems.
 
-## Demo scope in numbers
+## See the app
 
-| Seeded demo metric | Count |
+The Android emulator walkthrough captures the sign-in, picker dashboard, batch route, and freshness advisor. The short reel is generated from those real emulator screens in CI.
+
+[▶ Watch the 12-second demo reel](screenshots/picksure-demo.mp4)
+
+| Sign-in | Picker dashboard |
+| --- | --- |
+| ![PickSure sign-in screen](screenshots/01-login.png) | ![PickSure picker dashboard](screenshots/02-dashboard.png) |
+
+| Batch picking | Freshness and AI advisor |
+| --- | --- |
+| ![PickSure batch picking screen](screenshots/03-batch.png) | ![PickSure freshness monitor and advisor](screenshots/04-freshness-advisor.png) |
+
+The latest CI run also publishes a downloadable **unsigned debug APK** and test reports as a GitHub Actions artifact. It is for emulator/demo use, not a Play Store release. [Open CI runs and artifacts](https://github.com/chaitanya-maddala-236/PickSure/actions/workflows/android.yml).
+
+## The real-world problem and approach
+
+Quick-commerce pickers work against short delivery windows, move across a store shelf by shelf, and may lose network connectivity. Wrong-product scans, short-dated lots, and unacknowledged offline picks can each create fulfillment problems.
+
+PickSure addresses this with a two-scan workflow, store-configured minimum shelf life, FEFO lot selection, a Room-backed event queue, and per-event server acknowledgments. A freshness advisor suggests review actions for short-dated stock. It can use Gemini on a server-side API key; when that key is absent or unavailable, deterministic rules keep the advisor useful. Recommendations never modify stock and must be reviewed by store staff.
+
+## Demo data in numbers
+
+| Seeded portfolio scenario | Count |
 | --- | ---: |
-| Orders | 3 |
+| Assigned orders | 3 |
 | Order lines | 6 |
 | Grocery SKUs | 5 |
-| Inventory lots | 10 (2 per SKU) |
+| Expiry-tracked lots | 10 (2 per SKU) |
 | Starting inventory | 60 units |
 | Dispatchable at seed | 50 units |
-| Held back under the 3-day policy | 10 units |
+| Held back by the example shelf-life policy | 10 units |
 | Employee roles | 2 (picker and supervisor) |
-| Scans required per pick | 2 (product barcode + lot QR) |
+| Scans required for a pick | 2 (product barcode and lot QR) |
+| Automated test cases | 11 (2 Android unit, 5 shared KMP, 3 backend, 1 emulator UI flow) |
 
-These values describe the seeded sample only. They are implementation scope, not measured production improvements or customer outcomes.
+These are seed and test-scope counts, not production throughput, savings, or measured waste reduction.
 
-## Why it matters
+## Product workflow
 
-Quick-commerce teams must fulfill orders accurately while working against short delivery windows. A wrong SKU creates a customer issue; a short-dated grocery can arrive with little usable shelf life; a network interruption can lose work if picks exist only on the server.
+1. Sign in as a picker and open an assigned batch.
+2. Follow the aisle/rack/shelf route. The route planner is shared Kotlin code used by Android.
+3. Scan the requested product barcode; a mismatch cannot create a pick.
+4. Scan the recommended lot QR. The app checks the cached shelf-life rule and the API rechecks the lot, FEFO recommendation, quantity, and assignment.
+5. Room saves a UUID event before the app reports that the pick is locally saved. WorkManager retries when a network is available.
+6. A supervisor reviews short-dated and expired lots, substitution requests, and sync exceptions.
 
-PickSure addresses those risks with barcode checks, FEFO lot selection, a configurable minimum shelf-life rule, and a durable offline event queue. Held-back stock remains visible for store staff to review for markdown or donation before expiry.
+The **AI Freshness Advisor** receives only store inventory facts (SKU, lot, expiry date, quantity, and status). The Gemini key stays on the backend. Model output is checked against actual lot codes and allowed actions; expired lots can only receive a quarantine-review suggestion. Without Gemini configuration or when the provider fails, the advisor displays clearly labeled rule-based suggestions.
 
-## Core workflow
-
-1. Sign in as a picker and open the assigned batch.
-2. Follow the combined aisle, rack, and shelf route.
-3. Scan the product barcode. A mismatch is rejected without creating a pick.
-4. Scan the recommended lot QR. PickSure shows its lot code and expiry, then saves the pick locally.
-5. WorkManager uploads pending events when the device reconnects.
-6. The API rechecks the employee assignment, SKU, lot tag, expiry policy, FEFO recommendation, and available quantity before changing inventory.
-7. A supervisor reviews freshness levels, substitution requests, and sync exceptions.
-
-### Offline event lifecycle
-
-```text
-Camera scans SKU + lot
-        ↓
-Room stores UUID event before success is shown
-        ↓
-WorkManager waits for network
-        ↓
-FastAPI validates and applies event once logically
-        ↓
-Room shows server confirmation or keeps the rejection for review
-```
-
-Events are not removed when a sync attempt fails. The server returns a result for each UUID, so retrying an accepted event does not decrement inventory twice. Network delivery is at least once; idempotency provides exactly-once logical application.
-
-## Technology
-
-| Area | Stack |
-| --- | --- |
-| Android | Kotlin, Jetpack Compose, Material 3 |
-| Camera | CameraX, Google ML Kit barcode scanning |
-| Local data | Room, Kotlin Coroutines |
-| Background work | WorkManager with network constraints and retry |
-| Networking | Retrofit, Gson |
-| Backend | FastAPI, SQLAlchemy, JWT |
-| Database | PostgreSQL in Docker Compose; SQLite for local development |
-| Schema changes | Alembic |
-
-## Architecture
+## Architecture and stack
 
 ```mermaid
 flowchart LR
-    Picker[Picker / Supervisor] --> App[Android: Compose + CameraX + ML Kit]
-    App --> Cache[Room task cache + event queue]
-    Cache --> Worker[WorkManager]
-    Worker --> API[FastAPI API]
-    App --> API
-    API --> DB[(PostgreSQL)]
-    API --> Audit[Lot trace + audit log]
+    Picker[Picker / supervisor] --> Compose[Android Compose UI]
+    Compose --> Domain[Use cases + repository interfaces]
+    Domain --> Room[Room event queue + task cache]
+    Room --> Worker[WorkManager retry]
+    Worker --> API[FastAPI]
+    Compose --> API
+    API --> DB[(PostgreSQL / SQLite)]
+    API --> Advisor[Gemini advisor / rules fallback]
+    Shared[Kotlin Multiplatform shared policy] --> Compose
 ```
 
-The Android code is organized into `data/local`, `data/remote`, `data/sync`, and `ui` within one app module. The backend is a modular monolith with separate routers for auth, tasks, scanning, inventory freshness, synchronization, packing, substitutions, and audit records.
+| Area | Implementation |
+| --- | --- |
+| Android UI | Kotlin, Jetpack Compose, Material 3 |
+| Scanning | CameraX, Google ML Kit barcode scanning |
+| App structure | Data, domain models, repository interface, and use cases |
+| Offline work | Room, Kotlin Flow, Coroutines, WorkManager |
+| Shared logic | Kotlin Multiplatform module with freshness policy and shelf route planner; Android and iOS targets declared |
+| API | FastAPI, SQLAlchemy, JWT, Alembic |
+| AI | Gemini API called by the backend; deterministic fallback; no key embedded in the app |
+| Data | PostgreSQL in Docker Compose; SQLite for local development and CI |
+| Firebase | Crashlytics records sanitized non-fatal operation failures when a Firebase `google-services.json` is supplied |
 
-## Run the demo
+Offline delivery is at least once. Server UUID idempotency ensures an accepted event is applied once logically; rejected events remain available for review.
 
-### 1. Start the API and database
+## Tests and evidence
+
+GitHub Actions installs the backend dependencies, runs three backend advisor tests, starts a seeded API, and runs Android unit tests, shared KMP tests, and a Compose UI walkthrough on an API 35 emulator. The UI walkthrough signs in, visits batch picking and the freshness advisor, and saves the four screenshots used above. CI builds an unsigned debug APK and uploads reports and the APK artifact.
+
+```powershell
+# Backend tests (from backend/)
+python -m unittest discover -s tests -v
+
+# Android and shared Kotlin tests / APK (from android/)
+.\gradlew.bat :app:testDebugUnitTest :shared:testDebugUnitTest :app:assembleDebug
+
+# Emulator UI walkthrough (requires a running seeded API and Android emulator)
+.\gradlew.bat :app:connectedDebugAndroidTest
+```
+
+The UI walkthrough expects the API at `http://10.0.2.2:8000/api/v1/` from the Android emulator. CI configures and starts that API for the test. Local screenshots are not fabricated or checked in by hand; the repository images come from the emulator test.
+
+## Run the demo locally
+
+### 1. Start the backend and database
 
 From the repository root:
 
@@ -93,59 +113,53 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
-Docker runs Alembic migrations, starts PostgreSQL and the API, and seeds the demo store. The API is at `http://127.0.0.1:8000`; interactive API docs are at `http://127.0.0.1:8000/docs`.
+The API is at `http://127.0.0.1:8000` and its docs at `http://127.0.0.1:8000/docs`.
 
 | Role | Email | Password |
 | --- | --- | --- |
 | Picker | `picker@picksure.demo` | `PickSure123!` |
 | Supervisor | `supervisor@picksure.demo` | `PickSure123!` |
 
-The demo policy requires at least **3 calendar days** remaining at dispatch. Set `MINIMUM_SHELF_LIFE_DAYS` in `.env` to change it. This is an example store policy, not a universal food-safety or legal standard.
+The default example policy requires **3 calendar days** remaining at dispatch. It is an adjustable demo setting, not universal food-safety or legal guidance.
 
-For a camera demo, display or print the lot QR payload shown in the freshness monitor, and use grocery packages carrying the expected product barcodes. The scanner uses real camera frames; it has no simulated-scan button.
+To turn on Gemini, set `GEMINI_API_KEY` in the local `.env` used by Docker Compose. `GEMINI_MODEL` defaults to `gemini-2.5-flash`. Keep the key on the backend; never add it to Android resources or `gradle.properties`. The rules fallback works without a key.
 
-### 2. Open the Android app
+### 2. Build or open Android
 
-Open the `android` folder in Android Studio and sync Gradle, or build a debug APK from PowerShell:
+Open the `android` folder in Android Studio, or run:
 
 ```powershell
 cd android
 .\gradlew.bat assembleDebug
 ```
 
-The default API URL targets the Android emulator at `http://10.0.2.2:8000/api/v1/`. For a physical device, set `API_BASE_URL` in `android/gradle.properties` to the development computer's LAN address. The manifest allows cleartext HTTP for local development; use HTTPS and managed secrets for a deployment.
+The default emulator API URL is `http://10.0.2.2:8000/api/v1/`. For a physical device, set `API_BASE_URL` in `android/gradle.properties` to the development machine's LAN address. Local HTTP is enabled for this demo; use HTTPS for a deployment.
 
-### Local SQLite backend
+### Optional Firebase Crashlytics setup
 
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload
-```
+Create a Firebase Android app for package `com.picksure.android`, place its `google-services.json` at `android/app/google-services.json`, then rebuild. That local file is git-ignored. Gradle applies Google Services and Crashlytics only when the file exists. This repository includes the SDK integration and sanitized login-failure reporting, but no Firebase project credentials or production telemetry configuration.
 
-## Resume-ready project bullets
+## Resume-ready summary
 
-**PickSure — Offline-First Dark-Store Fulfillment App** · Kotlin, Jetpack Compose, CameraX, ML Kit, Room, WorkManager, FastAPI, PostgreSQL
+**PickSure — Offline-First Grocery Fulfillment Android App** · Kotlin, Jetpack Compose, Kotlin Flow, Room, WorkManager, KMP, CameraX, ML Kit, FastAPI, Gemini
 
-- Built a native Android grocery-picking workflow with aisle-ordered batch picking, product barcode verification, exception handling, substitution approval, and packing checks.
-- Implemented a two-scan FEFO flow that verifies both SKU and expiry lot, blocks stock below a configurable 3-day shelf-life policy, and records lot traceability through transactional inventory updates.
-- Designed offline event sync with Room persistence, UUID-based idempotency, per-event server acknowledgments, and WorkManager retries after connectivity returns.
-- Delivered picker and supervisor flows over a seeded demo covering **3 orders, 6 order lines, 5 SKUs, 10 inventory lots, and 2 employee roles**.
+- Built a native picker workflow for **3 demo orders / 6 lines / 5 grocery SKUs**, with aisle-based batch routing, barcode checks, lot QR verification, packing, and supervisor review.
+- Implemented FEFO lot selection and a configurable shelf-life guard across Android and backend, with lot traceability and transactional inventory updates.
+- Designed offline event recording with Room, Kotlin Flow, repository/use-case layers, WorkManager retries, and UUID-idempotent server acknowledgments.
+- Added a backend Gemini freshness advisor with a validated, rule-based fallback; recommendations are lot-grounded, staff-reviewed, and do not modify inventory.
+- Added **11 automated test cases** across Android unit, shared KMP, backend, and emulator UI flows; CI builds a debug APK and captures demo screens.
 
-The counts in the final bullet are demo dataset size, not throughput or business impact. Add measured outcomes only after collecting them from a real evaluation.
+Only the seeded scenario counts are quantified here. No user study, waste reduction, pick-time improvement, production deployment, Blinkit integration, or Play Store publication is claimed.
 
-## Project notes
+## Scope and limitations
 
-- [Freshness First design and operating assumptions](docs/freshness-first.md)
+The store, employees, tasks, inventory, and shelf locations are seeded demo data. The shelf route groups by aisle/rack/shelf; it is not a warehouse-optimization engine. Gemini integration requires the developer to provide a backend API key. Crashlytics requires a developer-owned Firebase app configuration. The repository does not contain a signed release APK or Play Store listing.
+
+## Design notes
+
+- [Freshness First](docs/freshness-first.md)
 - [Architecture](docs/architecture.md)
-- [Database schema](docs/database-schema.md)
-- [API design](docs/api-design.md)
 - [Offline synchronization](docs/offline-sync-design.md)
-- [Barcode workflow](docs/barcode-workflow.md)
-
-## Current scope
-
-The shelf map, users, orders, inventory, and lot dates are seeded examples. The shelf-ordering algorithm is deterministic and demonstrates route grouping; it is not a production warehouse optimizer. This repository does not include a signed APK, demo video, screenshots, live Blinkit integration, or measured waste/time savings.
+- [Barcode and lot workflow](docs/barcode-workflow.md)
+- [API design](docs/api-design.md)
+- [Database schema](docs/database-schema.md)

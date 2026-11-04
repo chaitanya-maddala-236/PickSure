@@ -22,6 +22,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-picksure-development-secret-change-before-deploy}
       DEMO_SEED: "true"
       MINIMUM_SHELF_LIFE_DAYS: ${MINIMUM_SHELF_LIFE_DAYS:-3}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
     ports:
       - "8000:8000"
     depends_on:

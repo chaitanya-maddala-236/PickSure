@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies import current_employee
 from app.models import Employee, Inventory, InventoryLot, Product, ShelfLocation
-from app.schemas import FreshnessLotView, FreshnessSummary, InventoryView
+from app.schemas import FreshnessAdvice, FreshnessLotView, FreshnessSummary, InventoryView
 from app.services.freshness import freshness_status, minimum_shelf_life_days
+from app.services.freshness_advisor import advise_on_freshness
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -30,6 +31,23 @@ def freshness_summary(db: Session = Depends(get_db), employee: Employee = Depend
         expired_units=sum(lot.quantity for lot in lots if lot.status == "expired"),
         lots=lots,
     )
+
+
+@router.get("/freshness/advice", response_model=FreshnessAdvice)
+def freshness_advice(db: Session = Depends(get_db), employee: Employee = Depends(current_employee)):
+    rows = db.query(InventoryLot, Product).join(Product, Product.id == InventoryLot.sku_id).filter(
+        InventoryLot.store_id == employee.store_id,
+        InventoryLot.quantity > 0,
+    ).order_by(InventoryLot.expires_on.asc()).all()
+    lots = [{
+        "sku": product.sku,
+        "product_name": product.name,
+        "lot_code": lot.lot_code,
+        "expires_on": lot.expires_on.isoformat(),
+        "quantity": lot.quantity,
+        "status": freshness_status(lot.expires_on),
+    } for lot, product in rows]
+    return advise_on_freshness(lots)
 
 
 @router.get("/{sku}", response_model=InventoryView)

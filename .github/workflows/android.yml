@@ -1,11 +1,14 @@
-name: Android build
+name: Android test, build, and portfolio capture
 on:
   push:
-    paths: ["android/**"]
+    branches: [main]
+    paths: ["android/**", "backend/**", ".github/workflows/android.yml"]
   pull_request:
-    paths: ["android/**"]
+    paths: ["android/**", "backend/**", ".github/workflows/android.yml"]
+permissions:
+  contents: write
 jobs:
-  assemble:
+  verify-and-capture:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,5 +17,66 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - run: bash gradlew assembleDebug
-        working-directory: android
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt
+        working-directory: backend
+      - run: python -m unittest discover -s tests -v
+        working-directory: backend
+      - name: Start seeded API for the Android walkthrough
+        run: |
+          mkdir -p "$RUNNER_TEMP/picksure"
+          DATABASE_URL="sqlite:///./picksure-ci.db" DEMO_SEED=true \
+            nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$RUNNER_TEMP/picksure/api.log" 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/picksure/api.log"
+          exit 1
+        working-directory: backend
+      - name: Run Android unit, shared KMP, and UI flow tests on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -no-audio -no-boot-anim -camera-back emulated
+          disable-animations: true
+          working-directory: android
+          script: ./gradlew :app:testDebugUnitTest :shared:testDebugUnitTest :app:connectedDebugAndroidTest :app:assembleDebug
+      - name: Collect screenshots and create the short demo reel
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          mkdir -p screenshots
+          adb pull /sdcard/Android/data/com.picksure.android/files/picksure-demo screenshots/captured
+          mv screenshots/captured/*.png screenshots/
+          rmdir screenshots/captured
+          ffmpeg -y -framerate 1/3 -pattern_type glob -i 'screenshots/0*.png' \
+            -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+            -r 30 -c:v libx264 -movflags +faststart screenshots/picksure-demo.mp4
+      - name: Commit first real emulator captures to the repository
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if [ ! -f screenshots/picksure-demo.mp4 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add screenshots/*.png screenshots/picksure-demo.mp4
+            git commit -m "Add emulator screenshots and demo reel"
+            git push
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: picksure-android-proof
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/androidTest-results/connected/**
+            android/app/build/reports/tests/**
+            screenshots/**
+          if-no-files-found: warn
+          retention-days: 30
