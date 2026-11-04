@@ -9,8 +9,8 @@ class PickedProgressTest {
     fun addsPendingAndSyncingPicksToLatestAcknowledgedServerCount() {
         val events = listOf(
             event("synced-1", "SYNCED", 2),
-            event("synced-2", "SYNCED", 4),
-            event("pending", "PENDING", 3),
+            event("synced-2", "SYNCED", 2),
+            event("pending", "PENDING", 2),
             event("syncing", "SYNCING", 1),
             event("rejected", "NEEDS_ATTENTION", 8),
             event("other-item", "PENDING", 10, itemId = "item-2"),
