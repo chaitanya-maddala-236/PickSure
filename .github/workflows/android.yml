@@ -52,7 +52,7 @@ jobs:
           heap-size: 1024M
           force-avd-creation: true
           emulator-boot-timeout: 1500
-          emulator-options: -no-window -no-audio -no-boot-anim -camera-back emulated
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
           disable-animations: true
           working-directory: android
           script: bash ../scripts/capture-emulator-demo.sh
