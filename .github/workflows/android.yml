@@ -46,7 +46,7 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -camera-back emulated
           disable-animations: true
           working-directory: android
-          script: ./gradlew :app:testDebugUnitTest :shared:testDebugUnitTest :app:connectedDebugAndroidTest :app:assembleDebug
+          script: bash gradlew :app:testDebugUnitTest :shared:testDebugUnitTest :app:connectedDebugAndroidTest :app:assembleDebug
       - name: Collect screenshots and create the short demo reel
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
