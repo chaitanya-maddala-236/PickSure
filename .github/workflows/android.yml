@@ -9,7 +9,9 @@ permissions:
   contents: write
 jobs:
   verify-and-capture:
-    runs-on: ubuntu-latest
+    # The emulator runner has intermittent boot hangs on newer hosted images.
+    # ubuntu-22.04 is a stable runner for this instrumented Android workflow.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -38,12 +40,15 @@ jobs:
         working-directory: backend
       - name: Run Android unit, shared KMP, and UI flow tests on an emulator
         uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 30
         with:
-          api-level: 35
+          api-level: 34
           target: google_apis
           arch: x86_64
           profile: pixel_2
-          emulator-options: -no-window -no-audio -no-boot-anim -camera-back emulated
+          force-avd-creation: true
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
           disable-animations: true
           working-directory: android
           script: bash gradlew :app:testDebugUnitTest :shared:testDebugUnitTest :app:connectedDebugAndroidTest :app:assembleDebug
