@@ -18,6 +18,6 @@ kotlin {
 
 android {
     namespace = "com.picksure.shared"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig { minSdk = 26 }
 }

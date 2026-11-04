@@ -12,7 +12,7 @@ if (file("google-services.json").exists()) {
 
 android {
     namespace = "com.picksure.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.picksure.android"
