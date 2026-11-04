@@ -18,6 +18,7 @@ android {
         applicationId = "com.picksure.android"
         minSdk = 26
         targetSdk = 35
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
         versionName = "1.0.0"
         val apiBaseUrl = providers.gradleProperty("API_BASE_URL").getOrElse("http://10.0.2.2:8000/api/v1/")
