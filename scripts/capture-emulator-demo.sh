@@ -42,7 +42,7 @@ cat ../screenshots/instrumentation.txt
 if [ "$instrumentation_status" -ne 0 ] || grep -q "shortMsg=Process crashed" ../screenshots/instrumentation.txt; then
   exit 1
 fi
-grep -q "INSTRUMENTATION_CODE: 0" ../screenshots/instrumentation.txt
+grep -Eq '^OK \([0-9]+ tests?\)$' ../screenshots/instrumentation.txt
 
 adb pull /sdcard/Android/data/com.picksure.android/files/picksure-demo ../screenshots/captured
 mv ../screenshots/captured/*.png ../screenshots/
