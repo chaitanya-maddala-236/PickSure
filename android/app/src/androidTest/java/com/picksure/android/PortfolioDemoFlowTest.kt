@@ -33,9 +33,9 @@ class PortfolioDemoFlowTest {
         saveScreen("03-batch")
 
         compose.onNodeWithText("Home").performClick()
-        compose.onNodeWithText("Freshness monitor").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Scan product + lot. Send the freshest eligible stock.").performClick()
         waitForText("Lot traceability")
-        compose.onNodeWithText("AI Freshness Advisor").assertIsDisplayed()
+        compose.onNodeWithText("AI Freshness Advisor").performScrollTo().assertIsDisplayed()
         saveScreen("04-freshness-advisor")
     }
 
