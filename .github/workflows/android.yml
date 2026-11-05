@@ -2,9 +2,9 @@ name: Android test, build, and portfolio capture
 on:
   push:
     branches: [main]
-    paths: ["android/**", "backend/**", ".github/workflows/android.yml"]
+    paths: ["android/**", "backend/**", "scripts/**", ".github/workflows/android.yml"]
   pull_request:
-    paths: ["android/**", "backend/**", ".github/workflows/android.yml"]
+    paths: ["android/**", "backend/**", "scripts/**", ".github/workflows/android.yml"]
 permissions:
   contents: write
 jobs:
