@@ -8,7 +8,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
@@ -35,9 +34,7 @@ class PortfolioDemoFlowTest {
 
         compose.onNodeWithText("Home").performClick()
         compose.onNodeWithText("Scan product + lot. Send the freshest eligible stock.").performClick()
-        waitForText("Lot traceability")
-        compose.onRoot().performTouchInput { swipeUp() }
-        compose.onNodeWithText("AI Freshness Advisor").assertIsDisplayed()
+        waitForText("AI Freshness Advisor")
         saveScreen("04-freshness-advisor")
     }
 

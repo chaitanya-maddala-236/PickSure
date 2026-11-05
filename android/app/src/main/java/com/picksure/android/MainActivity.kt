@@ -764,6 +764,7 @@ private fun FreshnessScreen(summary: FreshnessSummaryDto?, advice: FreshnessAdvi
             Spacer(Modifier.height(8.dp))
             Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Refresh lot monitor") }
         }
+        item { FreshnessAdvisorCard(advice) }
         if (summary == null) {
             item { EmptyCard("Store snapshot not loaded", "Connect to the fulfillment API to view live lot counts. Previously cached task lots remain visible during picking.") }
         } else {
@@ -784,7 +785,6 @@ private fun FreshnessScreen(summary: FreshnessSummaryDto?, advice: FreshnessAdvi
                     MetricCard("Expired", summary.expired_units.toString(), Modifier.weight(1f), Red)
                 }
             }
-            item { FreshnessAdvisorCard(advice) }
             item { Text("Lot traceability", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink) }
             if (summary.lots.isEmpty()) item { EmptyCard("No stock lots", "Inventory lots will appear when the store is seeded or replenished.") }
             items(summary.lots) { lot ->
