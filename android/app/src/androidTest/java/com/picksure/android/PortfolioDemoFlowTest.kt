@@ -29,7 +29,7 @@ class PortfolioDemoFlowTest {
         saveScreen("02-dashboard")
 
         compose.onNodeWithText("Start batch").performClick()
-        waitForText("Scan + verify")
+        waitForText("Follow the shelf route")
         saveScreen("03-batch")
 
         compose.onNodeWithText("Home").performClick()
